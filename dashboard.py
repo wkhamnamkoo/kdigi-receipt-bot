@@ -1,10 +1,18 @@
 import sqlite3
+from datetime import datetime
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+import io
+import csv
+import json
 
 DB_PATH = "kdigi_logs.db"
 
-# ดึง Log ทั้งหมดจาก SQLite
+
+# ══════════════════════════════════════════════════════════════
+# Database helpers
+# ══════════════════════════════════════════════════════════════
+
 def get_logs():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -14,281 +22,339 @@ def get_logs():
     conn.close()
     return rows
 
+
+def get_chart_data():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT
+            DATE(timestamp) as day,
+            SUM(CASE WHEN status LIKE '%สำเร็จ%' THEN 1 ELSE 0 END) as success,
+            SUM(CASE WHEN status NOT LIKE '%สำเร็จ%' THEN 1 ELSE 0 END) as error
+        FROM logs
+        WHERE timestamp >= DATE('now', '-6 days')
+        GROUP BY DATE(timestamp)
+        ORDER BY day ASC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+# ══════════════════════════════════════════════════════════════
+# HTML builder — แยก JS ออกมาเพื่อหลีกเลี่ยงปัญหา </script> ใน f-string
+# ══════════════════════════════════════════════════════════════
+
+def build_html(total, success, error, rate, now, rows_html, chart_labels, chart_success, chart_error):
+    bar_w = rate
+
+    # ── CSS ───────────────────────────────────────────────────────
+    css = """
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --navy:      #0d1b2a;
+  --navy-mid:  #162338;
+  --navy-soft: #1e3352;
+  --orange:    #f26522;
+  --orange-lt: #f9874a;
+  --cream:     #faf9f7;
+  --border:    #dde1e7;
+  --muted:     #8a93a2;
+  --text:      #1a2233;
+  --green:     #1a7a4a;
+  --green-bg:  #edf7f2;
+  --red:       #c0392b;
+  --red-bg:    #fdf0ee;
+  --radius:    6px;
+  --shadow-sm: 0 1px 4px rgba(0,0,0,.08);
+  --shadow-md: 0 4px 16px rgba(0,0,0,.10);
+}
+html { font-size: 14px; }
+body { font-family: 'IBM Plex Sans Thai', sans-serif; background: var(--cream); color: var(--text); min-height: 100vh; }
+.topbar { background: var(--navy); border-bottom: 3px solid var(--orange); padding: 0 40px; display: flex; align-items: stretch; justify-content: space-between; height: 64px; }
+.topbar-left { display: flex; align-items: center; gap: 16px; }
+.logo-mark { width: 36px; height: 36px; background: var(--orange); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; color: white; letter-spacing: -1px; flex-shrink: 0; }
+.brand-text .company { font-size: 15px; font-weight: 600; color: white; letter-spacing: .3px; }
+.brand-text .system { font-size: 11px; color: var(--muted); letter-spacing: .5px; text-transform: uppercase; }
+.topbar-right { display: flex; align-items: center; gap: 24px; }
+.live-dot { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); letter-spacing: .4px; }
+.live-dot::before { content: ''; width: 8px; height: 8px; background: #2ecc71; border-radius: 50%; box-shadow: 0 0 0 3px rgba(46,204,113,.25); animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 3px rgba(46,204,113,.25); } 50% { box-shadow: 0 0 0 6px rgba(46,204,113,.10); } }
+.topbar-time { font-size: 12px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; border-left: 1px solid var(--navy-soft); padding-left: 24px; }
+main { max-width: 1400px; margin: 0 auto; padding: 32px 40px 60px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
+.kpi-card { background: white; border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 20px 24px; position: relative; overflow: hidden; }
+.kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--orange); }
+.kpi-label { font-size: 10px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.kpi-value { font-size: 36px; font-weight: 700; color: var(--text); line-height: 1; margin-bottom: 4px; font-family: 'IBM Plex Mono', monospace; }
+.kpi-sub { font-size: 11px; color: var(--muted); }
+.progress-wrap { margin-top: 12px; background: #f0f2f5; border-radius: 99px; height: 4px; overflow: hidden; }
+.progress-bar { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--orange), var(--orange-lt)); transition: width .6s ease; }
+.section-label { font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 16px; }
+.divider { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.toolbar-left { display: flex; align-items: center; gap: 12px; }
+.row-count { font-size: 11px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; background: #f0f2f5; padding: 3px 8px; border-radius: 99px; }
+.btn-refresh { display: flex; align-items: center; gap: 6px; background: var(--navy); color: white; border: none; padding: 8px 18px; border-radius: var(--radius); font-size: 12px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; cursor: pointer; font-family: 'IBM Plex Sans Thai', sans-serif; }
+.btn-refresh:hover { background: #1e2f45; }
+.btn-export { display: flex; align-items: center; gap: 6px; background: var(--green); color: white; border: none; padding: 8px 18px; border-radius: var(--radius); font-size: 12px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; cursor: pointer; text-decoration: none; font-family: 'IBM Plex Sans Thai', sans-serif; }
+.table-wrap { background: white; border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); overflow: hidden; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead { background: var(--navy); }
+th { padding: 11px 14px; text-align: left; font-size: 10px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: #ffffff; white-space: nowrap; }
+td { padding: 11px 14px; border-bottom: 1px solid #f0f2f5; vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #fafbfc; }
+.badge { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 10px; font-weight: 700; letter-spacing: .6px; }
+.badge-ok  { background: var(--green-bg); color: var(--green); }
+.badge-err { background: var(--red-bg);   color: var(--red); }
+.td-id   { color: var(--muted); font-family: 'IBM Plex Mono', monospace; width: 48px; }
+.td-ref  { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+.td-amt  { font-family: 'IBM Plex Mono', monospace; font-size: 12px; text-align: right; }
+.td-inv  { font-size: 11px; color: #445; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td-ocr  { font-size: 11px; color: var(--muted); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td-img  { width: 72px; }
+.slip-thumb { width: 56px; height: 40px; object-fit: cover; border-radius: 4px; cursor: zoom-in; border: 1px solid var(--border); }
+.no-img { font-size: 10px; color: var(--muted); }
+.empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+.empty-state .icon { font-size: 40px; margin-bottom: 12px; }
+.modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 1000; align-items: center; justify-content: center; }
+.modal.show { display: flex; }
+.modal-inner { background: white; border-radius: 10px; padding: 24px; max-width: 520px; width: 90%; }
+.modal-label { font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; }
+.modal-img { width: 100%; border-radius: 6px; margin-bottom: 16px; }
+.btn-close { width: 100%; padding: 10px; background: var(--navy); color: white; border: none; border-radius: var(--radius); font-size: 13px; cursor: pointer; font-family: 'IBM Plex Sans Thai', sans-serif; }
+.footer { background: var(--navy); color: var(--muted); font-size: 11px; padding: 16px 40px; display: flex; justify-content: space-between; margin-top: 40px; border-top: 1px solid var(--navy-soft); }
+.chart-wrap { background: white; border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 24px 28px; margin-bottom: 32px; }
+"""
+
+    # ── KPI Cards ──────────────────────────────────────────────────
+    kpi_html = f"""
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <div class="kpi-label">Total Transactions</div>
+    <div class="kpi-value">{total}</div>
+    <div class="kpi-sub">All time</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Completed</div>
+    <div class="kpi-value" style="color:var(--green)">{success}</div>
+    <div class="kpi-sub">สำเร็จแล้วค่ะ</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Errors</div>
+    <div class="kpi-value" style="color:var(--red)">{error}</div>
+    <div class="kpi-sub">ต้องดำเนินการค่ะ</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Success Rate</div>
+    <div class="kpi-value">{rate}<span style="font-size:18px;color:var(--muted)">%</span></div>
+    <div class="progress-wrap"><div class="progress-bar" style="width:{bar_w}%"></div></div>
+  </div>
+</div>"""
+
+    # ── Rows table ─────────────────────────────────────────────────
+    table_content = (
+        "<div class='empty-state'><div class='icon'>📭</div><p>ยังไม่มีข้อมูลในระบบค่ะ</p></div>"
+        if total == 0 else
+        f"<table><thead><tr>"
+        "<th>#</th><th>Timestamp</th><th>LINE User ID</th><th>Type</th>"
+        "<th>Reference No.</th><th style='text-align:right'>Amount (THB)</th>"
+        "<th>Status</th><th>Invoice File</th><th>OCR Preview</th><th>Slip Image</th>"
+        f"</tr></thead><tbody>{rows_html}</tbody></table>"
+    )
+
+    # ── JS (ไม่อยู่ใน f-string ค่ะ) ──────────────────────────────
+    js = (
+        "function showModal(src){"
+        "document.getElementById('modal-img').src=src;"
+        "document.getElementById('modal').classList.add('show');}"
+
+        "function closeModal(){"
+        "document.getElementById('modal').classList.remove('show');"
+        "document.getElementById('modal-img').src='';}"
+
+        "document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});"
+
+        "function refreshPage(){"
+        "var btn=document.getElementById('refresh-btn');"
+        "btn.textContent='⏳ Loading…';btn.disabled=true;btn.style.opacity='.6';"
+        "setTimeout(()=>location.reload(),300);}"
+
+        "function playAlertSound(){"
+        "var a=new(window.AudioContext||window.webkitAudioContext)();"
+        "[0,0.3,0.6].forEach(function(d){"
+        "var o=a.createOscillator(),g=a.createGain();"
+        "o.connect(g);g.connect(a.destination);"
+        "o.type='sine';o.frequency.value=880;"
+        "g.gain.setValueAtTime(0.4,a.currentTime+d);"
+        "g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+d+0.25);"
+        "o.start(a.currentTime+d);o.stop(a.currentTime+d+0.25);});}"
+
+        # Auto refresh
+        + f"var CERR={error},CD=30;"
+        "var tel=document.getElementById('auto-refresh-timer');"
+        "var tk=setInterval(function(){"
+        "CD--;if(tel)tel.textContent='Auto refresh in '+CD+'s';"
+        "if(CD<=0){clearInterval(tk);"
+        "fetch('/dashboard/error-count').then(function(r){return r.json();})"
+        ".then(function(d){if(d.error_count>CERR){playAlertSound();}location.reload();})"
+        ".catch(function(){location.reload();});}},1000);"
+    )
+
+    # ── Assemble HTML ──────────────────────────────────────────────
+    html = (
+        "<!DOCTYPE html><html lang='th'><head>"
+        "<meta charset='UTF-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>K-Digi Transaction Monitor — KLN Seaport</title>"
+        "<link href='https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap' rel='stylesheet'>"
+        "<style>" + css + "</style>"
+        "</head><body>"
+
+        "<header class='topbar'>"
+        "<div class='topbar-left'>"
+        "<div class='logo-mark'>KL</div>"
+        "<div class='brand-text'>"
+        "<div class='company'>KLN Seaport</div>"
+        "<div class='system'>K-Digi · Transaction Monitor</div>"
+        "</div></div>"
+        "<div class='topbar-right'>"
+        "<span class='live-dot'>LIVE</span>"
+        f"<span class='topbar-time'>{now}</span>"
+        "</div></header>"
+
+        "<main>"
+        + kpi_html +
+        "<hr class='divider'>"
+
+        "<div class='toolbar'>"
+        "<div class='toolbar-left'>"
+        "<div class='section-label' style='margin:0'>Transaction Log</div>"
+        f"<span class='row-count'>{total} rows</span>"
+        "</div>"
+        "<div style='display:flex;gap:10px;align-items:center'>"
+        "<span id='auto-refresh-timer' style='font-size:11px;color:#8a93a2;font-family:IBM Plex Mono,monospace'>Auto refresh in 30s</span>"
+        "<a href='/dashboard/export' class='btn-export'>↓ &nbsp;Export CSV</a>"
+        "<button class='btn-refresh' onclick='refreshPage()' id='refresh-btn'>↻ &nbsp;Refresh</button>"
+        "</div></div>"
+
+        "<div class='table-wrap'>" + table_content + "</div>"
+        "</main>"
+
+        "<footer class='footer'>"
+        "<div class='footer-left'><strong>KLN Seaport</strong> — K-Digi Receipt Bot &nbsp;|&nbsp; Application Support Division</div>"
+        "<div class='footer-right'>Confidential — Internal Use Only</div>"
+        "</footer>"
+
+        "<div class='modal' id='modal' onclick='closeModal()'>"
+        "<div class='modal-inner' onclick='event.stopPropagation()'>"
+        "<div class='modal-label'>Payment Slip — Evidence Record</div>"
+        "<img class='modal-img' id='modal-img' src=''>"
+        "<button class='btn-close' onclick='closeModal()'>Close &nbsp;✕</button>"
+        "</div></div>"
+
+        "<script>" + js + "</script>"
+        "</body></html>"
+    )
+    return html
+
+
+# ══════════════════════════════════════════════════════════════
+# Routes
+# ══════════════════════════════════════════════════════════════
+
 def add_dashboard_route(app: FastAPI):
+
     @app.get("/dashboard", response_class=HTMLResponse)
     def dashboard():
-        logs = get_logs()
-
-        # คำนวณสถิติ
-        total = len(logs)
+        logs    = get_logs()
+        total   = len(logs)
         success = sum(1 for r in logs if "สำเร็จ" in (r["status"] or ""))
-        error = total - success
+        error   = total - success
+        rate    = round(success / total * 100) if total > 0 else 0
+        now     = datetime.now().strftime("%d %b %Y, %H:%M")
 
-        # สร้าง HTML แถวตาราง
+        # Chart data
+        chart_rows    = get_chart_data()
+        chart_labels  = json.dumps([r["day"]     for r in chart_rows])
+        chart_success = json.dumps([r["success"] for r in chart_rows])
+        chart_error   = json.dumps([r["error"]   for r in chart_rows])
+
+        # Table rows
         rows_html = ""
         for r in logs:
-            # แสดงรูปสลิปจาก Base64 ถ้ามี
             if r["slip_image_b64"]:
                 img_html = (
                     f'<img src="data:image/jpeg;base64,{r["slip_image_b64"]}" '
-                    f'style="width:70px;height:70px;object-fit:cover;border-radius:8px;'
-                    f'cursor:pointer;border:1px solid #e5e7eb" '
-                    f'onclick="showModal(this.src)" title="คลิกดูรูปใหญ่">'
+                    f'class="slip-thumb" onclick="showModal(this.src)" title="คลิกเพื่อขยาย">'
                 )
             else:
-                img_html = '<span style="color:#9ca3af;font-size:12px">ไม่มีรูป</span>'
+                img_html = '<span class="no-img">— ไม่มีรูป —</span>'
 
-            # Badge สถานะ
             status_val = r["status"] or ""
             if "สำเร็จ" in status_val:
-                status_html = f'<span style="background:#dcfce7;color:#16a34a;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600">✅ สำเร็จ</span>'
+                badge = '<span class="badge badge-ok">COMPLETED</span>'
             else:
-                status_html = f'<span style="background:#fee2e2;color:#dc2626;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600">❌ {status_val.replace("❌","").strip()}</span>'
+                label = status_val.replace("❌", "").strip() or "ERROR"
+                badge = f'<span class="badge badge-err">{label}</span>'
 
-            # OCR Text ย่อๆ
-            ocr_short = (r["ocr_text"] or "-")[:60] + ("..." if len(r["ocr_text"] or "") > 60 else "")
+            slip_type = r["slip_type"] or "—"
+            ref_str   = r["ref_no"]   or "—"
+            amount_str = f'{r["amount"]:,.2f}' if r["amount"] else "—"
+            inv_str   = r["invoice_no"] or "—"
+            inv_short = inv_str[:20] + "…" if len(inv_str) > 20 else inv_str
+            ocr_short = (r["ocr_text"] or "")[:40]
 
-            rows_html += f"""
-            <tr>
-                <td style="color:#6b7280;font-size:13px">{r['id']}</td>
-                <td style="font-size:13px">{r['timestamp'] or '-'}</td>
-                <td style="font-size:11px;color:#6b7280">{(r['user_id'] or '')[:20]}...</td>
-                <td><span style="background:#f3f4f6;padding:2px 8px;border-radius:6px;font-size:12px">{r['slip_type'] or '-'}</span></td>
-                <td style="font-family:monospace;font-size:13px;color:#f26522">{r['ref_no'] or '-'}</td>
-                <td style="font-size:13px">{f"{r['amount']:,.2f}" if r['amount'] else '-'}</td>
-                <td>{status_html}</td>
-                <td style="font-size:11px;color:#374151;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{r['invoice_no'] or ''}">{r['invoice_no'] or '-'}</td>
-                <td style="font-size:11px;color:#6b7280;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{r['ocr_text'] or ''}">{ocr_short}</td>
-                <td>{img_html}</td>
-            </tr>
-            """
+            rows_html += (
+                "<tr>"
+                f'<td class="td-id">{r["id"]}</td>'
+                f'<td>{r["timestamp"] or "—"}</td>'
+                f'<td style="font-size:11px;color:#555">{(r["user_id"] or "")[:16]}…</td>'
+                f'<td>{slip_type}</td>'
+                f'<td class="td-ref">{ref_str}</td>'
+                f'<td class="td-amt">{amount_str}</td>'
+                f'<td>{badge}</td>'
+                f'<td class="td-inv" title="{inv_str}">{inv_short}</td>'
+                f'<td class="td-ocr" title="{r["ocr_text"] or ""}">{ocr_short or "—"}</td>'
+                f'<td class="td-img">{img_html}</td>'
+                "</tr>"
+            )
 
-        # สร้าง success rate
-        rate = round((success / total * 100)) if total > 0 else 0
-
-        html = f"""<!DOCTYPE html>
-<html lang="th">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KLN Seaport — Admin Dashboard</title>
-    <style>
-        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{ font-family: 'Segoe UI', Tahoma, sans-serif; background: #f5f5f5; color: #1a1a2e; }}
-
-        /* Header */
-        .header {{
-            background: #1a1a2e;
-            color: white;
-            padding: 20px 32px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            border-bottom: 4px solid #f26522;
-        }}
-        .header h1 {{ font-size: 20px; font-weight: 700; }}
-        .header h1 span {{ color: #f26522; }}
-        .header p {{ font-size: 13px; color: #9ca3af; margin-top: 2px; }}
-        .header-badge {{
-            background: #f26522;
-            color: white;
-            padding: 6px 14px;
-            border-radius: 99px;
-            font-size: 13px;
-            font-weight: 600;
-        }}
-
-        /* Stats Cards */
-        .stats {{ display: flex; gap: 16px; padding: 24px 32px 0; }}
-        .card {{
-            background: white;
-            border-radius: 12px;
-            padding: 20px 24px;
-            flex: 1;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.07);
-            border: 1px solid #e5e7eb;
-            border-top: 4px solid #e5e7eb;
-        }}
-        .card .label {{ font-size: 13px; color: #6b7280; font-weight: 500; }}
-        .card .num {{ font-size: 40px; font-weight: 700; margin-top: 4px; line-height: 1; }}
-        .card .sub {{ font-size: 12px; color: #9ca3af; margin-top: 6px; }}
-        .card.total {{ border-top-color: #f26522; }}
-        .card.total .num {{ color: #f26522; }}
-        .card.success {{ border-top-color: #16a34a; }}
-        .card.success .num {{ color: #16a34a; }}
-        .card.error {{ border-top-color: #dc2626; }}
-        .card.error .num {{ color: #dc2626; }}
-        .card.rate {{ border-top-color: #1a1a2e; }}
-        .card.rate .num {{ color: #1a1a2e; }}
-
-        /* Table */
-        .table-section {{ margin: 24px 32px 32px; }}
-        .table-header {{
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 12px;
-        }}
-        .table-header h2 {{ font-size: 16px; font-weight: 600; color: #1a1a2e; }}
-        .table-wrap {{
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.07);
-            border: 1px solid #e5e7eb;
-            overflow: auto;
-        }}
-        table {{ width: 100%; border-collapse: collapse; font-size: 13px; min-width: 900px; }}
-        thead tr {{ background: #1a1a2e; }}
-        th {{
-            padding: 12px 14px;
-            text-align: left;
-            color: #f26522;
-            font-weight: 600;
-            font-size: 12px;
-            white-space: nowrap;
-        }}
-        td {{ padding: 12px 14px; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }}
-        tr:last-child td {{ border-bottom: none; }}
-        tbody tr:hover td {{ background: #fff8f5; }}
-
-        /* Modal ดูรูปใหญ่ */
-        .modal {{
-            display: none;
-            position: fixed;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            background: rgba(26,26,46,0.92);
-            z-index: 999;
-            align-items: center;
-            justify-content: center;
-            flex-direction: column;
-            gap: 16px;
-        }}
-        .modal.show {{ display: flex; }}
-        .modal img {{
-            max-width: 88vw;
-            max-height: 82vh;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-            border: 3px solid #f26522;
-        }}
-        .modal-close {{
-            color: white;
-            font-size: 14px;
-            cursor: pointer;
-            background: #f26522;
-            padding: 8px 20px;
-            border-radius: 99px;
-            border: none;
-            font-weight: 600;
-        }}
-        .empty {{ text-align: center; padding: 48px; color: #9ca3af; }}
-    </style>
-</head>
-<body>
-
-    <!-- Header -->
-    <div class="header">
-        <div>
-            <h1>🧾 <span style="color:#f26522">KLN</span> Seaport — Admin Dashboard</h1>
-            <p>ระบบติดตาม Transaction และรูปสลิปสำหรับทีม Support ค่ะ</p>
-        </div>
-        <div class="header-badge">● Live</div>
-    </div>
-
-    <!-- Stats -->
-    <div class="stats">
-        <div class="card total">
-            <div class="label">Transaction ทั้งหมด</div>
-            <div class="num">{total}</div>
-            <div class="sub">ทุก Transaction ที่เข้ามาค่ะ</div>
-        </div>
-        <div class="card success">
-            <div class="label">✅ สำเร็จ</div>
-            <div class="num">{success}</div>
-            <div class="sub">ได้รับใบเสร็จแล้วค่ะ</div>
-        </div>
-        <div class="card error">
-            <div class="label">❌ Error</div>
-            <div class="num">{error}</div>
-            <div class="sub">ต้องตรวจสอบค่ะ</div>
-        </div>
-        <div class="card rate">
-            <div class="label">อัตราสำเร็จ</div>
-            <div class="num">{rate}%</div>
-            <div class="sub">Success Rate</div>
-        </div>
-    </div>
-
-    <!-- Table -->
-    <div class="table-section">
-        <div class="table-header">
-            <h2>📋 Log ทั้งหมด ({total} รายการ)</h2>
-            <div style="display:flex;align-items:center;gap:12px">
-                <span style="font-size:12px;color:#9ca3af">เรียงจากล่าสุดค่ะ • กดรูปเพื่อดูใหญ่</span>
-                <button onclick="refreshPage()" id="refresh-btn"
-                    style="display:flex;align-items:center;gap:6px;
-                           background:#f26522;color:white;border:none;
-                           padding:8px 16px;border-radius:8px;font-size:13px;
-                           font-weight:600;cursor:pointer;">
-                    🔄 Refresh
-                </button>
-            </div>
-        </div>
-        <div class="table-wrap">
-            {"<div class='empty'>ยังไม่มีข้อมูลค่ะ</div>" if total == 0 else f"""
-            <table>
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>เวลา</th>
-                        <th>User ID</th>
-                        <th>ประเภท</th>
-                        <th>Ref No.</th>
-                        <th>ยอดเงิน (บาท)</th>
-                        <th>สถานะ</th>
-                        <th>Invoice</th>
-                        <th>OCR Text</th>
-                        <th>รูปสลิป</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows_html}
-                </tbody>
-            </table>
-            """}
-        </div>
-    </div>
-
-    <!-- Modal ดูรูปใหญ่ -->
-    <div class="modal" id="modal" onclick="closeModal()">
-        <img id="modal-img" src="" onclick="event.stopPropagation()">
-        <button class="modal-close" onclick="closeModal()">✕ ปิด</button>
-    </div>
-
-    <script>
-        function showModal(src) {{
-            document.getElementById('modal-img').src = src;
-            document.getElementById('modal').classList.add('show');
-        }}
-        function closeModal() {{
-            document.getElementById('modal').classList.remove('show');
-            document.getElementById('modal-img').src = '';
-        }}
-        // กด ESC ปิด Modal
-        document.addEventListener('keydown', e => {{
-            if (e.key === 'Escape') closeModal();
-        }});
-        // Refresh หน้าพร้อม Animation
-        function refreshPage() {{
-            const btn = document.getElementById('refresh-btn');
-            btn.innerHTML = '⏳ กำลังโหลด...';
-            btn.style.opacity = '0.7';
-            btn.disabled = true;
-            setTimeout(() => location.reload(), 300);
-        }}
-    </script>
-
-</body>
-</html>"""
+        html = build_html(
+            total, success, error, rate, now,
+            rows_html, chart_labels, chart_success, chart_error
+        )
         return HTMLResponse(content=html)
+
+    # ── Error count API (สำหรับ Auto Refresh) ─────────────────
+    @app.get("/dashboard/error-count")
+    def error_count():
+        logs  = get_logs()
+        err   = sum(1 for r in logs if "สำเร็จ" not in (r["status"] or ""))
+        return JSONResponse({"error_count": err, "total": len(logs)})
+
+    # ── Export CSV ─────────────────────────────────────────────
+    @app.get("/dashboard/export")
+    def export_csv():
+        logs  = get_logs()
+        today = datetime.now().strftime("%Y-%m-%d")
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["ID", "Timestamp", "User ID", "Slip Type",
+                         "Reference No.", "Amount (THB)", "Status",
+                         "Invoice No.", "OCR Text"])
+        for r in logs:
+            writer.writerow([
+                r["id"], r["timestamp"] or "", r["user_id"] or "",
+                r["slip_type"] or "", r["ref_no"] or "", r["amount"] or "",
+                r["status"] or "", r["invoice_no"] or "",
+                (r["ocr_text"] or "")[:200]
+            ])
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv; charset=utf-8-sig",
+            headers={"Content-Disposition": f"attachment; filename=kdigi_logs_{today}.csv"}
+        )

@@ -14,6 +14,37 @@ from line_service import reply_message, reply_invoice, reply_info_and_invoice
 from db_service import init_db, log_to_db
 from dashboard import add_dashboard_route  # ✅ เพิ่ม Admin Dashboard
 
+# ══════════════════════════════════════════════════════════════
+# ✅ แจ้งเตือนไป LINE กลุ่ม Support เมื่อเกิด Error ค่ะ
+# ══════════════════════════════════════════════════════════════
+def notify_support(message: str):
+    """ส่งข้อความแจ้งเตือนไปยัง LINE กลุ่ม Support ค่ะ"""
+    group_id = os.getenv("LINE_SUPPORT_GROUP_ID")  # Group ID จาก .env ค่ะ
+    token    = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+
+    if not group_id:
+        print("⚠️ ไม่พบ LINE_SUPPORT_GROUP_ID ใน .env ค่ะ")
+        return
+
+    try:
+        import requests as req
+        req.post(
+            "https://api.line.me/v2/bot/message/push",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "to": group_id,
+                "messages": [{"type": "text", "text": message}]
+            },
+            timeout=5
+        )
+        print(f"✅ แจ้งเตือน Support แล้วค่ะ")
+    except Exception as e:
+        print(f"⚠️ แจ้งเตือนไม่สำเร็จค่ะ: {e}")
+#══════════════════════════════════════════════════════════════
+
 load_dotenv() #--> ดึงค่า Token และ API Key จากไฟล์ .env มาใช้งาน (ปลอดภัย ไม่ต้องเขียน Token จริงๆ ลงใน Code โดยตรง)
 
 app = FastAPI() #-->  สร้าง Web Server ขึ้นมา 1 ตัว รอรับข้อมูลจากภายนอก
@@ -173,7 +204,15 @@ def handle_image(event):
         
         # กรณี OCR อ่านไม่ได้เลย (slip_data เป็น None → ไม่มี ocr_text)
         if not slip_data:
-            log_to_db(user_id, status="❌ OCR อ่านไม่ได้", slip_image_b64=slip_image_b64)  # ✅ เพิ่ม slip_image_b64
+            log_to_db(user_id, status="❌ OCR อ่านไม่ได้", slip_image_b64=slip_image_b64)
+            notify_support(  # ✅ แจ้งทีม Support ค่ะ
+                f"🚨 [K-Digi Alert] OCR อ่านสลิปไม่ได้ค่ะ\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"👤 User ID: {user_id[:20]}...\n"
+                f"🕐 เวลา: {__import__('datetime').datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"⚠️ กรุณาตรวจสอบและช่วยลูกค้าด้วยตนเองค่ะ"
+            )
             reply_message(line_bot_api, reply_token, "❌ ไม่สามารถอ่านข้อมูลจากสลิปได้\nกรุณาส่งรูปสลิปที่ชัดเจนค่ะ")
             return
         
@@ -194,7 +233,17 @@ def handle_image(event):
                 user_id,
                 status="❌ หา Ref No. ไม่เจอ",
                 ocr_text=slip_data.get("ocr_text", ""),
-                slip_image_b64=slip_image_b64  # ✅ เพิ่ม slip_image_b64
+                slip_image_b64=slip_image_b64
+            )
+            notify_support(  # ✅ แจ้งทีม Support ค่ะ
+                f"🚨 [K-Digi Alert] อ่าน Ref No. ไม่ได้ค่ะ\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"👤 User ID: {user_id[:20]}...\n"
+                f"🕐 เวลา: {__import__('datetime').datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
+                f"📄 OCR: {slip_data.get('ocr_text','')[:80]}...\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"⚠️ สลิปเป็น KERRY แต่หา Ref No. 12 หลักไม่พบค่ะ\n"
+                f"กรุณาตรวจสอบและช่วยลูกค้าด้วยตนเองค่ะ"
             )
             reply_message(line_bot_api, reply_token, "❌ ไม่สามารถอ่านข้อมูลจากสลิปได้\nกรุณาส่งใหม่อีกครั้ง หรือติดต่อ Admin K-Digi ค่ะ")
             return
@@ -211,7 +260,19 @@ def handle_image(event):
                 amount=slip_data.get("amount"),
                 status="❌ ไม่พบใบเสร็จใน API",
                 ocr_text=slip_data.get("ocr_text", ""),
-                slip_image_b64=slip_image_b64  # ✅ เพิ่ม slip_image_b64
+                slip_image_b64=slip_image_b64
+            )
+            notify_support(  # ✅ แจ้งทีม Support ค่ะ
+                f"🚨 [K-Digi Alert] ไม่พบใบเสร็จใน Server ค่ะ\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"👤 User ID: {user_id[:20]}...\n"
+                f"🕐 เวลา: {__import__('datetime').datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
+                f"🔢 Ref No.: {slip_data.get('bankTransactionNo', '-')}\n"
+                f"💰 ยอดเงิน: {slip_data.get('amount', '-')} บาท\n"
+                f"📋 ประเภท: {slip_data.get('slip_type', '-')}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"⚠️ OCR อ่านได้ แต่ไม่พบใบเสร็จใน KLN API ค่ะ\n"
+                f"กรุณาตรวจสอบและช่วยลูกค้าด้วยตนเองค่ะ"
             )
             reply_message(line_bot_api, reply_token, "❌ ไม่พบใบเสร็จของท่านค่ะ\nกรุณาติดต่อเจ้าหน้าที่ค่ะ")
             return
