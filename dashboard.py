@@ -1,6 +1,6 @@
 import sqlite3
 from datetime import datetime
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 import io
 import csv
@@ -13,11 +13,27 @@ DB_PATH = "kdigi_logs.db"
 # Database helpers
 # ══════════════════════════════════════════════════════════════
 
-def get_logs():
+def get_logs(date_from: str = None, date_to: str = None):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM logs ORDER BY id DESC")
+    if date_from and date_to:
+        cursor.execute(
+            "SELECT * FROM logs WHERE DATE(timestamp) BETWEEN ? AND ? ORDER BY id DESC",
+            (date_from, date_to)
+        )
+    elif date_from:
+        cursor.execute(
+            "SELECT * FROM logs WHERE DATE(timestamp) >= ? ORDER BY id DESC",
+            (date_from,)
+        )
+    elif date_to:
+        cursor.execute(
+            "SELECT * FROM logs WHERE DATE(timestamp) <= ? ORDER BY id DESC",
+            (date_to,)
+        )
+    else:
+        cursor.execute("SELECT * FROM logs ORDER BY id DESC")
     rows = cursor.fetchall()
     conn.close()
     return rows
@@ -46,87 +62,248 @@ def get_chart_data():
 # HTML builder — แยก JS ออกมาเพื่อหลีกเลี่ยงปัญหา </script> ใน f-string
 # ══════════════════════════════════════════════════════════════
 
-def build_html(total, success, error, rate, now, rows_html, chart_labels, chart_success, chart_error):
+def build_html(total, success, error, rate, now, rows_html, chart_labels, chart_success, chart_error, date_from='', date_to='', is_filtered=False):
     bar_w = rate
 
     # ── CSS ───────────────────────────────────────────────────────
     css = """
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --navy:      #0d1b2a;
-  --navy-mid:  #162338;
-  --navy-soft: #1e3352;
+  --bg:        #f4f4f4;
+  --white:     #ffffff;
+  --dark:      #1a1a1a;
+  --gray:      #3a3a3a;
+  --gray-mid:  #555555;
+  --gray-lt:   #e0e0e0;
+  --border:    #cccccc;
   --orange:    #f26522;
-  --orange-lt: #f9874a;
-  --cream:     #faf9f7;
-  --border:    #dde1e7;
-  --muted:     #8a93a2;
-  --text:      #1a2233;
-  --green:     #1a7a4a;
-  --green-bg:  #edf7f2;
-  --red:       #c0392b;
-  --red-bg:    #fdf0ee;
-  --radius:    6px;
-  --shadow-sm: 0 1px 4px rgba(0,0,0,.08);
-  --shadow-md: 0 4px 16px rgba(0,0,0,.10);
+  --orange-dk: #d4541a;
+  --text:      #222222;
+  --muted:     #777777;
+  --green:     #2e7d32;
+  --green-bg:  #e8f5e9;
+  --red:       #c62828;
+  --red-bg:    #ffebee;
+  --radius:    3px;
+  --shadow:    0 1px 3px rgba(0,0,0,.15);
 }
-html { font-size: 14px; }
-body { font-family: 'IBM Plex Sans Thai', sans-serif; background: var(--cream); color: var(--text); min-height: 100vh; }
-.topbar { background: var(--navy); border-bottom: 3px solid var(--orange); padding: 0 40px; display: flex; align-items: stretch; justify-content: space-between; height: 64px; }
-.topbar-left { display: flex; align-items: center; gap: 16px; }
-.logo-mark { width: 36px; height: 36px; background: var(--orange); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; color: white; letter-spacing: -1px; flex-shrink: 0; }
-.brand-text .company { font-size: 15px; font-weight: 600; color: white; letter-spacing: .3px; }
-.brand-text .system { font-size: 11px; color: var(--muted); letter-spacing: .5px; text-transform: uppercase; }
-.topbar-right { display: flex; align-items: center; gap: 24px; }
-.live-dot { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); letter-spacing: .4px; }
-.live-dot::before { content: ''; width: 8px; height: 8px; background: #2ecc71; border-radius: 50%; box-shadow: 0 0 0 3px rgba(46,204,113,.25); animation: pulse 2s infinite; }
-@keyframes pulse { 0%,100% { box-shadow: 0 0 0 3px rgba(46,204,113,.25); } 50% { box-shadow: 0 0 0 6px rgba(46,204,113,.10); } }
-.topbar-time { font-size: 12px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; border-left: 1px solid var(--navy-soft); padding-left: 24px; }
-main { max-width: 1400px; margin: 0 auto; padding: 32px 40px 60px; }
-.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
-.kpi-card { background: white; border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 20px 24px; position: relative; overflow: hidden; }
-.kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--orange); }
-.kpi-label { font-size: 10px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
-.kpi-value { font-size: 36px; font-weight: 700; color: var(--text); line-height: 1; margin-bottom: 4px; font-family: 'IBM Plex Mono', monospace; }
+html { font-size: 13px; }
+body { font-family: 'Sarabun', 'Tahoma', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+/* ── Top Navigation Bar ── */
+.topbar {
+  background: var(--dark);
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 52px;
+  border-bottom: 1px solid #333;
+}
+.topbar-brand {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--orange);
+  letter-spacing: .5px;
+}
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-size: 12px;
+  color: #aaa;
+}
+.live-badge {
+  background: #2e7d32;
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 2px;
+  letter-spacing: .5px;
+}
+
+/* ── Page Header ── */
+.page-header {
+  background: var(--white);
+  border-bottom: 3px solid var(--orange);
+  padding: 12px 24px;
+}
+.page-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--orange);
+}
+
+/* ── Main content ── */
+main { padding: 20px 24px 60px; }
+
+/* ── KPI Cards ── */
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.kpi-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--orange);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px 20px;
+}
+.kpi-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 6px; }
+.kpi-value { font-size: 32px; font-weight: 700; color: var(--text); line-height: 1; margin-bottom: 4px; }
 .kpi-sub { font-size: 11px; color: var(--muted); }
-.progress-wrap { margin-top: 12px; background: #f0f2f5; border-radius: 99px; height: 4px; overflow: hidden; }
-.progress-bar { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--orange), var(--orange-lt)); transition: width .6s ease; }
-.section-label { font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 16px; }
-.divider { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
-.toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.toolbar-left { display: flex; align-items: center; gap: 12px; }
-.row-count { font-size: 11px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; background: #f0f2f5; padding: 3px 8px; border-radius: 99px; }
-.btn-refresh { display: flex; align-items: center; gap: 6px; background: var(--navy); color: white; border: none; padding: 8px 18px; border-radius: var(--radius); font-size: 12px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; cursor: pointer; font-family: 'IBM Plex Sans Thai', sans-serif; }
-.btn-refresh:hover { background: #1e2f45; }
-.btn-export { display: flex; align-items: center; gap: 6px; background: var(--green); color: white; border: none; padding: 8px 18px; border-radius: var(--radius); font-size: 12px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; cursor: pointer; text-decoration: none; font-family: 'IBM Plex Sans Thai', sans-serif; }
-.table-wrap { background: white; border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); overflow: hidden; overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-thead { background: var(--navy); }
-th { padding: 11px 14px; text-align: left; font-size: 10px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: #ffffff; white-space: nowrap; }
-td { padding: 11px 14px; border-bottom: 1px solid #f0f2f5; vertical-align: middle; }
+.progress-wrap { margin-top: 10px; background: var(--gray-lt); border-radius: 2px; height: 4px; }
+.progress-bar { height: 100%; border-radius: 2px; background: var(--orange); }
+
+/* ── Toolbar ── */
+.toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.toolbar-left { display: flex; align-items: center; gap: 10px; }
+.section-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.row-count { font-size: 11px; color: var(--muted); background: var(--gray-lt); padding: 2px 8px; border-radius: 2px; }
+.btn-refresh {
+  background: var(--gray);
+  color: white;
+  border: none;
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: 'Sarabun', 'Tahoma', sans-serif;
+}
+.btn-refresh:hover { background: #444; }
+.btn-export {
+  background: var(--orange);
+  color: white;
+  border: none;
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: none;
+  font-family: 'Sarabun', 'Tahoma', sans-serif;
+  font-weight: 600;
+}
+.btn-export:hover { background: var(--orange-dk); }
+.auto-timer { font-size: 11px; color: var(--muted); }
+
+/* ── Table ── */
+.table-wrap {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  overflow-x: auto;
+}
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead { background: var(--gray); }
+th {
+  padding: 9px 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+  border-right: 1px solid #555;
+}
+th:last-child { border-right: none; }
+td { padding: 8px 12px; border-bottom: 1px solid #eeeeee; vertical-align: middle; color: var(--text); }
 tr:last-child td { border-bottom: none; }
-tr:hover td { background: #fafbfc; }
-.badge { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 10px; font-weight: 700; letter-spacing: .6px; }
-.badge-ok  { background: var(--green-bg); color: var(--green); }
-.badge-err { background: var(--red-bg);   color: var(--red); }
-.td-id   { color: var(--muted); font-family: 'IBM Plex Mono', monospace; width: 48px; }
-.td-ref  { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
-.td-amt  { font-family: 'IBM Plex Mono', monospace; font-size: 12px; text-align: right; }
-.td-inv  { font-size: 11px; color: #445; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.td-ocr  { font-size: 11px; color: var(--muted); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.td-img  { width: 72px; }
-.slip-thumb { width: 56px; height: 40px; object-fit: cover; border-radius: 4px; cursor: zoom-in; border: 1px solid var(--border); }
+tr:nth-child(even) td { background: #fafafa; }
+tr:hover td { background: #fff3ec; }
+
+/* ── Badges ── */
+.badge { display: inline-block; padding: 2px 8px; border-radius: 2px; font-size: 10px; font-weight: 700; letter-spacing: .4px; }
+.badge-ok  { background: var(--green-bg); color: var(--green); border: 1px solid #a5d6a7; }
+.badge-err { background: var(--red-bg);   color: var(--red);   border: 1px solid #ef9a9a; }
+
+/* ── Table cell styles ── */
+.td-id  { color: var(--muted); width: 40px; font-size: 11px; }
+.td-ref { font-family: 'Courier New', monospace; font-size: 11px; }
+.td-amt { font-family: 'Courier New', monospace; font-size: 11px; text-align: right; }
+.td-inv { font-size: 11px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td-ocr { font-size: 11px; color: var(--muted); max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td-img { width: 68px; }
+.slip-thumb { width: 52px; height: 38px; object-fit: cover; border-radius: 2px; cursor: zoom-in; border: 1px solid var(--border); }
 .no-img { font-size: 10px; color: var(--muted); }
-.empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
-.empty-state .icon { font-size: 40px; margin-bottom: 12px; }
-.modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 1000; align-items: center; justify-content: center; }
+
+/* ── Empty state ── */
+.empty-state { text-align: center; padding: 50px 20px; color: var(--muted); }
+.empty-state .icon { font-size: 36px; margin-bottom: 10px; }
+
+/* ── Modal ── */
+.modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 1000; align-items: center; justify-content: center; }
 .modal.show { display: flex; }
-.modal-inner { background: white; border-radius: 10px; padding: 24px; max-width: 520px; width: 90%; }
-.modal-label { font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; }
-.modal-img { width: 100%; border-radius: 6px; margin-bottom: 16px; }
-.btn-close { width: 100%; padding: 10px; background: var(--navy); color: white; border: none; border-radius: var(--radius); font-size: 13px; cursor: pointer; font-family: 'IBM Plex Sans Thai', sans-serif; }
-.footer { background: var(--navy); color: var(--muted); font-size: 11px; padding: 16px 40px; display: flex; justify-content: space-between; margin-top: 40px; border-top: 1px solid var(--navy-soft); }
-.chart-wrap { background: white; border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 24px 28px; margin-bottom: 32px; }
+.modal-inner { background: white; border-radius: 4px; padding: 20px; max-width: 500px; width: 90%; }
+.modal-label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+.modal-img { width: 100%; border-radius: 3px; margin-bottom: 14px; }
+.btn-close { width: 100%; padding: 9px; background: var(--gray); color: white; border: none; border-radius: var(--radius); font-size: 13px; cursor: pointer; }
+
+/* ── Footer ── */
+.footer {
+  background: var(--dark);
+  color: #888;
+  font-size: 11px;
+  padding: 12px 24px;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 32px;
+}
+.divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
+/* ── Date Filter Bar ── */
+.filter-bar {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 20px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  box-shadow: var(--shadow);
+  flex-wrap: wrap;
+}
+.filter-group { display: flex; flex-direction: column; gap: 4px; }
+.filter-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.filter-input {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: 'Sarabun', 'Tahoma', sans-serif;
+  color: var(--text);
+  background: white;
+  height: 30px;
+  min-width: 140px;
+}
+.filter-input:focus { outline: none; border-color: var(--orange); }
+.btn-search {
+  background: var(--orange);
+  color: white;
+  border: none;
+  padding: 6px 18px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  height: 30px;
+  font-family: 'Sarabun', 'Tahoma', sans-serif;
+}
+.btn-search:hover { background: var(--orange-dk); }
+.btn-reset {
+  background: var(--gray);
+  color: white;
+  border: none;
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  cursor: pointer;
+  height: 30px;
+  text-decoration: none;
+  font-family: 'Sarabun', 'Tahoma', sans-serif;
+}
+.btn-reset:hover { background: #444; }
+.filter-result { font-size: 11px; color: var(--orange); font-weight: 600; align-self: center; }
 """
 
     # ── KPI Cards ──────────────────────────────────────────────────
@@ -192,6 +369,14 @@ tr:hover td { background: #fafbfc; }
         "g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+d+0.25);"
         "o.start(a.currentTime+d);o.stop(a.currentTime+d+0.25);});}"
 
+        "function applyFilter(){"
+        "var df=document.getElementById('df').value;"
+        "var dt=document.getElementById('dt').value;"
+        "var url='/dashboard?';"
+        "if(df)url+='date_from='+df+'&';"
+        "if(dt)url+='date_to='+dt;"
+        "window.location.href=url;}"
+
         # Auto refresh
         + f"var CERR={error},CD=30;"
         "var tel=document.getElementById('auto-refresh-timer');"
@@ -209,50 +394,59 @@ tr:hover td { background: #fafbfc; }
         "<meta charset='UTF-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<title>K-Digi Transaction Monitor — KLN Seaport</title>"
-        "<link href='https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap' rel='stylesheet'>"
+        "<link href='https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&display=swap' rel='stylesheet'>"
         "<style>" + css + "</style>"
         "</head><body>"
 
         "<header class='topbar'>"
-        "<div class='topbar-left'>"
-        "<div class='logo-mark'>KL</div>"
-        "<div class='brand-text'>"
-        "<div class='company'>KLN Seaport</div>"
-        "<div class='system'>K-Digi · Transaction Monitor</div>"
-        "</div></div>"
+        "<div class='topbar-brand'>KLN Seaport Ltd.</div>"
         "<div class='topbar-right'>"
-        "<span class='live-dot'>LIVE</span>"
-        f"<span class='topbar-time'>{now}</span>"
+        "<span class='live-badge'>LIVE</span>"
+        f"<span>{now}</span>"
+        "<span>K-Digi · Application Support</span>"
         "</div></header>"
 
+        "<div class='page-header'>"
+        "<div class='page-title'>K-Digi Transaction Monitor</div>"
+        "</div>"
+
         "<main>"
+        "<div class='filter-bar'>"
+        "<div class='filter-group'><label class='filter-label'>Start Date From</label>"
+        f"<input class='filter-input' type='date' id='df' value='{date_from}'></div>"
+        "<div class='filter-group'><label class='filter-label'>Start Date To</label>"
+        f"<input class='filter-input' type='date' id='dt' value='{date_to}'></div>"
+        "<button class='btn-search' onclick='applyFilter()'>Search</button>"
+        "<a class='btn-reset' href='/dashboard'>Reset</a>"
+        + ("<span class='filter-result'>" + f"Filtered: {date_from} — {date_to}" + "</span>" if is_filtered else "") +
+        "</div>"
         + kpi_html +
         "<hr class='divider'>"
 
         "<div class='toolbar'>"
         "<div class='toolbar-left'>"
-        "<div class='section-label' style='margin:0'>Transaction Log</div>"
+        "<div class='section-title'>Transaction Log</div>"
         f"<span class='row-count'>{total} rows</span>"
         "</div>"
-        "<div style='display:flex;gap:10px;align-items:center'>"
-        "<span id='auto-refresh-timer' style='font-size:11px;color:#8a93a2;font-family:IBM Plex Mono,monospace'>Auto refresh in 30s</span>"
-        "<a href='/dashboard/export' class='btn-export'>↓ &nbsp;Export CSV</a>"
-        "<button class='btn-refresh' onclick='refreshPage()' id='refresh-btn'>↻ &nbsp;Refresh</button>"
+        "<div style='display:flex;gap:8px;align-items:center'>"
+        "<span class='auto-timer' id='auto-refresh-timer'>Auto refresh in 30s</span>"
+        "<a href='/dashboard/export' class='btn-export'>Export CSV</a>"
+        "<button class='btn-refresh' onclick='refreshPage()' id='refresh-btn'>↻ Refresh</button>"
         "</div></div>"
 
         "<div class='table-wrap'>" + table_content + "</div>"
         "</main>"
 
         "<footer class='footer'>"
-        "<div class='footer-left'><strong>KLN Seaport</strong> — K-Digi Receipt Bot &nbsp;|&nbsp; Application Support Division</div>"
-        "<div class='footer-right'>Confidential — Internal Use Only</div>"
+        "<div><strong style='color:#f26522'>KLN Seaport Ltd.</strong> — K-Digi Receipt Bot | Application Support Division</div>"
+        "<div>Confidential — Internal Use Only</div>"
         "</footer>"
 
         "<div class='modal' id='modal' onclick='closeModal()'>"
         "<div class='modal-inner' onclick='event.stopPropagation()'>"
         "<div class='modal-label'>Payment Slip — Evidence Record</div>"
         "<img class='modal-img' id='modal-img' src=''>"
-        "<button class='btn-close' onclick='closeModal()'>Close &nbsp;✕</button>"
+        "<button class='btn-close' onclick='closeModal()'>Close ✕</button>"
         "</div></div>"
 
         "<script>" + js + "</script>"
@@ -268,8 +462,11 @@ tr:hover td { background: #fafbfc; }
 def add_dashboard_route(app: FastAPI):
 
     @app.get("/dashboard", response_class=HTMLResponse)
-    def dashboard():
-        logs    = get_logs()
+    def dashboard(request: Request):
+        date_from = request.query_params.get("date_from", "")
+        date_to   = request.query_params.get("date_to", "")
+        is_filtered = bool(date_from or date_to)
+        logs    = get_logs(date_from or None, date_to or None)
         total   = len(logs)
         success = sum(1 for r in logs if "สำเร็จ" in (r["status"] or ""))
         error   = total - success
@@ -324,7 +521,8 @@ def add_dashboard_route(app: FastAPI):
 
         html = build_html(
             total, success, error, rate, now,
-            rows_html, chart_labels, chart_success, chart_error
+            rows_html, chart_labels, chart_success, chart_error,
+            date_from, date_to, is_filtered
         )
         return HTMLResponse(content=html)
 
