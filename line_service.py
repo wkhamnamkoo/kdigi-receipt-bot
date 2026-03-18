@@ -164,6 +164,204 @@ def reply_info_and_invoice(line_bot_api: MessagingApi, reply_token: str, info_te
     except Exception as e:
         print(f"Line Reply Error: {e}")
         
+
+#=============================== push_support_reply =====================================
+
+def push_support_reply(
+    user_id: str,
+    access_token: str,
+    message: str = "",
+    file_url: str = "",
+    file_name: str = "",
+    send_slip: bool = False,
+    slip_b64: str = "",
+    slip_url: str = ""
+):
+    """
+    ส่ง Flex Message จาก Support Dashboard ไปหา User ค่ะ
+    รองรับ: ข้อความ, ลิงก์ไฟล์, รูปสลิปเดิม — ส่งทีละ bubble หรือ carousel ค่ะ
+    """
+    import requests as _req
+
+    bubbles = []
+
+    # ── Bubble 1: ข้อความจากทีม Support ──
+    if message.strip():
+        bubbles.append({
+            "type": "bubble",
+            "size": "kilo",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#1a1a1a",
+                "paddingAll": "14px",
+                "contents": [{
+                    "type": "text",
+                    "text": "📩 ข้อความจากทีม K-Digi",
+                    "color": "#f26522",
+                    "weight": "bold",
+                    "size": "sm"
+                }]
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "16px",
+                "contents": [{
+                    "type": "text",
+                    "text": message.strip(),
+                    "wrap": True,
+                    "size": "sm",
+                    "color": "#333333"
+                }]
+            }
+        })
+
+    # ── Bubble 2: ไฟล์แนบ ──
+    if file_url.strip():
+        display_name = file_name.strip() if file_name.strip() else "ไฟล์จากทีม Support"
+        # ตรวจประเภทไฟล์ค่ะ
+        ext = file_url.rsplit(".", 1)[-1].lower() if "." in file_url else ""
+        if ext in ("jpg", "jpeg", "png", "gif", "webp"):
+            icon = "🖼"
+            type_label = "รูปภาพ"
+        elif ext == "pdf":
+            icon = "📄"
+            type_label = "PDF"
+        elif ext in ("xlsx", "xls"):
+            icon = "📊"
+            type_label = "Excel"
+        elif ext in ("docx", "doc"):
+            icon = "📝"
+            type_label = "Word"
+        else:
+            icon = "📎"
+            type_label = "ไฟล์"
+
+        bubbles.append({
+            "type": "bubble",
+            "size": "kilo",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#1a1a1a",
+                "paddingAll": "14px",
+                "contents": [{
+                    "type": "text",
+                    "text": f"{icon} ไฟล์แนบจากทีม K-Digi",
+                    "color": "#f26522",
+                    "weight": "bold",
+                    "size": "sm"
+                }]
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "16px",
+                "spacing": "sm",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": display_name,
+                        "wrap": True,
+                        "weight": "bold",
+                        "size": "sm",
+                        "color": "#222222"
+                    },
+                    {
+                        "type": "text",
+                        "text": f"ประเภท: {type_label}",
+                        "size": "xs",
+                        "color": "#888888"
+                    }
+                ]
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "12px",
+                "contents": [{
+                    "type": "button",
+                    "style": "primary",
+                    "color": "#00B900",
+                    "height": "sm",
+                    "action": {
+                        "type": "uri",
+                        "label": "คลิกเพื่อดาวน์โหลด",
+                        "uri": file_url.strip()
+                    }
+                }]
+            }
+        })
+
+    # ── Bubble 3: รูปสลิปเดิม ──
+    if send_slip and slip_url.strip():
+        bubbles.append({
+            "type": "bubble",
+            "size": "kilo",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#1a1a1a",
+                "paddingAll": "14px",
+                "contents": [{
+                    "type": "text",
+                    "text": "🧾 สลิปที่คุณส่งมาค่ะ",
+                    "color": "#f26522",
+                    "weight": "bold",
+                    "size": "sm"
+                }]
+            },
+            "hero": {
+                "type": "image",
+                "url": slip_url.strip(),
+                "size": "full",
+                "aspectRatio": "3:4",
+                "aspectMode": "cover"
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "12px",
+                "contents": [{
+                    "type": "text",
+                    "text": "รูปสลิปที่คุณส่งมาค่ะ",
+                    "size": "xs",
+                    "color": "#888888",
+                    "wrap": True
+                }]
+            }
+        })
+
+    if not bubbles:
+        return {"status": "error", "detail": "ไม่มีเนื้อหาที่จะส่งค่ะ"}
+
+    flex_content = bubbles[0] if len(bubbles) == 1 else {
+        "type": "carousel",
+        "contents": bubbles
+    }
+    alt = "ข้อความจากทีม K-Digi Support"
+
+    payload = {
+        "to": user_id,
+        "messages": [{
+            "type": "flex",
+            "altText": alt,
+            "contents": flex_content
+        }]
+    }
+    res = _req.post(
+        "https://api.line.me/v2/bot/message/push",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        },
+        json=payload,
+        timeout=10
+    )
+    return {"status": "ok"} if res.status_code == 200 else {"status": "error", "detail": res.text}
+
+#=======================================================================================
     #========================================== Summary line_service.py =========================================
     
     #reply_message()
