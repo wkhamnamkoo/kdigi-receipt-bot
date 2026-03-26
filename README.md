@@ -2,7 +2,7 @@
 ### Automated Slip Verification and Receipt Delivery System Using LINE Messaging API
 
 > โครงงานสหกิจศึกษา / ผลงานระหว่างการฝึกงาน  
-> บริษัท KLN Seaport Ltd. | ปีการศึกษา 2567
+> บริษัท KLN Seaport Ltd. | ปีการศึกษา 2568
 
 ---
 
