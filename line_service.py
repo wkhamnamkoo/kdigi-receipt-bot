@@ -1,171 +1,105 @@
+import requests as _req
 from linebot.v3.messaging import (
     MessagingApi,
-    ReplyMessageRequest,#ใช้สร้าง Request สำหรับตอบกลับ
-    TextMessage, #ข้อความธรรมดา
-    FlexMessage,#ข้อความแบบ Custom UI มีปุ่มได้
-    FlexContainer #ใช้แปลง dict เป็น Flex Object
+    ReplyMessageRequest,
+    TextMessage,
+    FlexMessage,
+    FlexContainer,
 )
 
-#====================================== reply_message ========================================
 
-def reply_message(line_bot_api: MessagingApi, reply_token: str, text: str): #--> ใช้ส่ง ข้อความธรรมดา กลับหา User เช่น ข้อความแจ้ง Error หรือ Welcome Message
+# ── Reply helpers ──────────────────────────────────────────────
+
+def reply_message(line_bot_api: MessagingApi, reply_token: str, text: str):
+    """ส่งข้อความธรรมดากลับหา User"""
     try:
         line_bot_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=reply_token,
-                messages=[TextMessage(text=text)]
-            )
+            ReplyMessageRequest(reply_token=reply_token,
+                                messages=[TextMessage(text=text)])
         )
     except Exception as e:
         print(f"Line Reply Error: {e}")
 
-#==============================================================================================
+
+def _build_invoice_bubbles(result: list) -> list:
+    """สร้าง list ของ Flex bubble จาก invoice result"""
+    bubbles = []
+    for i, item in enumerate(result):
+        invoice_no  = item.get("InvoiceNo", "invoice.pdf")
+        invoice_url = item.get("InvoiceUrl", "")
+        label = f"ไฟล์ที่ {i + 1}: {invoice_no}" if len(result) > 1 else invoice_no
+        bubbles.append({
+            "type": "bubble",
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {"type": "text", "text": "📄 ใบเสร็จของคุณพร้อมแล้วค่ะ",
+                     "weight": "bold", "size": "md", "wrap": True},
+                    {"type": "text", "text": label,
+                     "size": "sm", "color": "#888888", "wrap": True, "margin": "sm"},
+                ],
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [{
+                    "type": "button",
+                    "style": "primary",
+                    "color": "#00B900",
+                    "action": {"type": "uri", "label": "คลิกเพื่อดาวน์โหลด",
+                               "uri": invoice_url},
+                }],
+            },
+        })
+    return bubbles
 
 
-#======================================= reply_invoice ========================================
+def _flex_content(bubbles: list) -> dict:
+    if len(bubbles) == 1:
+        return bubbles[0]
+    return {"type": "carousel", "contents": bubbles}
 
-def reply_invoice(line_bot_api: MessagingApi, reply_token: str, result: list): #--> ใช้ส่ง Flex Message กลับหา User โดยวน Loop สร้าง Bubble ทีละใบเสร็จ
+
+def reply_invoice(line_bot_api: MessagingApi, reply_token: str, result: list):
+    """ส่ง Flex Message ใบเสร็จกลับหา User"""
     try:
-        bubbles = []
-        for i, item in enumerate(result):
-            invoice_no = item.get("InvoiceNo", "invoice.pdf")
-            invoice_url = item.get("InvoiceUrl", "")
-            label = f"ไฟล์ที่ {i + 1}: {invoice_no}" if len(result) > 1 else invoice_no #--> ถ้ามี 1 ใบเสร็จ → แสดงชื่อไฟล์เดียว , ถ้ามี หลายใบเสร็จ → แสดง "ไฟล์ที่ 1, ไฟล์ที่ 2..."
-            
-            bubble = {
-                "type": "bubble",
-                "body": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "contents": [
-                        {
-                            "type": "text",
-                            "text": "📄 ใบเสร็จของคุณพร้อมแล้วค่ะ",
-                            "weight": "bold",
-                            "size": "md",
-                            "wrap": True
-                        },
-                        {
-                            "type": "text",
-                            "text": label,
-                            "size": "sm",
-                            "color": "#888888",
-                            "wrap": True,
-                            "margin": "sm"
-                        }
-                    ]
-                },
-                "footer": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "contents": [
-                        {
-                            "type": "button",
-                            "style": "primary",
-                            "color": "#00B900",
-                            "action": {
-                                "type": "uri",
-                                "label": "คลิกเพื่อดาวน์โหลด",
-                                "uri": invoice_url
-                            }
-                        }
-                    ]
-                }
-            }
-            bubbles.append(bubble)
-        
-        flex_content = bubbles[0] if len(bubbles) == 1 else { # → Bubble เดี่ยว
-            "type": "carousel",
-            "contents": bubbles
-        }
-        
+        bubbles = _build_invoice_bubbles(result)
         line_bot_api.reply_message(
             ReplyMessageRequest(
                 reply_token=reply_token,
-                messages=[
-                    FlexMessage(
-                        alt_text="📄 ใบเสร็จของคุณพร้อมแล้วค่ะ",
-                        contents=FlexContainer.from_dict(flex_content)
-                    )
-                ]
+                messages=[FlexMessage(
+                    alt_text="📄 ใบเสร็จของคุณพร้อมแล้วค่ะ",
+                    contents=FlexContainer.from_dict(_flex_content(bubbles)),
+                )],
             )
         )
     except Exception as e:
         print(f"Line Reply Flex Error: {e}")
 
-def reply_info_and_invoice(line_bot_api: MessagingApi, reply_token: str, info_text: str, result: list):
+
+def reply_info_and_invoice(line_bot_api: MessagingApi, reply_token: str,
+                           info_text: str, result: list):
+    """ส่งข้อความ + Flex ใบเสร็จพร้อมกัน"""
     try:
-        bubbles = []
-        for i, item in enumerate(result):
-            invoice_no = item.get("InvoiceNo", "invoice.pdf")
-            invoice_url = item.get("InvoiceUrl", "")
-            label = f"ไฟล์ที่ {i + 1}: {invoice_no}" if len(result) > 1 else invoice_no
-            
-            bubble = {
-                "type": "bubble",
-                "body": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "contents": [
-                        {
-                            "type": "text",
-                            "text": "📄 ใบเสร็จของคุณพร้อมแล้วค่ะ",
-                            "weight": "bold",
-                            "size": "md",
-                            "wrap": True
-                        },
-                        {
-                            "type": "text",
-                            "text": label,
-                            "size": "sm",
-                            "color": "#888888",
-                            "wrap": True,
-                            "margin": "sm"
-                        }
-                    ]
-                },
-                "footer": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "contents": [
-                        {
-                            "type": "button",
-                            "style": "primary",
-                            "color": "#00B900",
-                            "action": {
-                                "type": "uri",
-                                "label": "คลิกเพื่อดาวน์โหลด",
-                                "uri": invoice_url
-                            }
-                        }
-                    ]
-                }
-            }
-            bubbles.append(bubble)
-        
-        flex_content = bubbles[0] if len(bubbles) == 1 else { # → Carousel เลื่อนซ้ายขวาได้
-            "type": "carousel",
-            "contents": bubbles
-        }
-        
-        # ส่ง 2 ข้อความพร้อมกันในครั้งเดียว
+        bubbles = _build_invoice_bubbles(result)
         line_bot_api.reply_message(
             ReplyMessageRequest(
                 reply_token=reply_token,
                 messages=[
-                    TextMessage(text=info_text),# ข้อความแจ้งข้อมูล
-                    FlexMessage( # Flex ใบเสร็จ
+                    TextMessage(text=info_text),
+                    FlexMessage(
                         alt_text="📄 ใบเสร็จของคุณพร้อมแล้วค่ะ",
-                        contents=FlexContainer.from_dict(flex_content)
-                    )
-                ]
+                        contents=FlexContainer.from_dict(_flex_content(bubbles)),
+                    ),
+                ],
             )
         )
     except Exception as e:
         print(f"Line Reply Error: {e}")
-        
 
-#=============================== push_support_reply =====================================
+
+# ── Push from Support Dashboard ────────────────────────────────
 
 def push_support_reply(
     user_id: str,
@@ -174,205 +108,105 @@ def push_support_reply(
     file_url: str = "",
     file_name: str = "",
     send_slip: bool = False,
-    slip_b64: str = "",
-    slip_url: str = ""
-):
-    """
-    ส่ง Flex Message จาก Support Dashboard ไปหา User ค่ะ
-    รองรับ: ข้อความ, ลิงก์ไฟล์, รูปสลิปเดิม — ส่งทีละ bubble หรือ carousel ค่ะ
-    """
-    import requests as _req
-
+    slip_url: str = "",
+) -> dict:
+    """ส่ง Flex Message จาก Support Dashboard ไปหา User"""
     bubbles = []
 
-    # ── Bubble 1: ข้อความจากทีม Support ──
     if message.strip():
-        bubbles.append({
-            "type": "bubble",
-            "size": "kilo",
-            "header": {
-                "type": "box",
-                "layout": "vertical",
-                "backgroundColor": "#1a1a1a",
-                "paddingAll": "14px",
-                "contents": [{
-                    "type": "text",
-                    "text": "📩 ข้อความจากทีม K-Digi",
-                    "color": "#f26522",
-                    "weight": "bold",
-                    "size": "sm"
-                }]
-            },
-            "body": {
-                "type": "box",
-                "layout": "vertical",
-                "paddingAll": "16px",
-                "contents": [{
-                    "type": "text",
-                    "text": message.strip(),
-                    "wrap": True,
-                    "size": "sm",
-                    "color": "#333333"
-                }]
-            }
-        })
+        bubbles.append(_bubble_message(message.strip()))
 
-    # ── Bubble 2: ไฟล์แนบ ──
     if file_url.strip():
-        display_name = file_name.strip() if file_name.strip() else "ไฟล์จากทีม Support"
-        # ตรวจประเภทไฟล์ค่ะ
-        ext = file_url.rsplit(".", 1)[-1].lower() if "." in file_url else ""
-        if ext in ("jpg", "jpeg", "png", "gif", "webp"):
-            icon = "🖼"
-            type_label = "รูปภาพ"
-        elif ext == "pdf":
-            icon = "📄"
-            type_label = "PDF"
-        elif ext in ("xlsx", "xls"):
-            icon = "📊"
-            type_label = "Excel"
-        elif ext in ("docx", "doc"):
-            icon = "📝"
-            type_label = "Word"
-        else:
-            icon = "📎"
-            type_label = "ไฟล์"
+        bubbles.append(_bubble_file(file_url.strip(), file_name.strip()))
 
-        bubbles.append({
-            "type": "bubble",
-            "size": "kilo",
-            "header": {
-                "type": "box",
-                "layout": "vertical",
-                "backgroundColor": "#1a1a1a",
-                "paddingAll": "14px",
-                "contents": [{
-                    "type": "text",
-                    "text": f"{icon} ไฟล์แนบจากทีม K-Digi",
-                    "color": "#f26522",
-                    "weight": "bold",
-                    "size": "sm"
-                }]
-            },
-            "body": {
-                "type": "box",
-                "layout": "vertical",
-                "paddingAll": "16px",
-                "spacing": "sm",
-                "contents": [
-                    {
-                        "type": "text",
-                        "text": display_name,
-                        "wrap": True,
-                        "weight": "bold",
-                        "size": "sm",
-                        "color": "#222222"
-                    },
-                    {
-                        "type": "text",
-                        "text": f"ประเภท: {type_label}",
-                        "size": "xs",
-                        "color": "#888888"
-                    }
-                ]
-            },
-            "footer": {
-                "type": "box",
-                "layout": "vertical",
-                "paddingAll": "12px",
-                "contents": [{
-                    "type": "button",
-                    "style": "primary",
-                    "color": "#00B900",
-                    "height": "sm",
-                    "action": {
-                        "type": "uri",
-                        "label": "คลิกเพื่อดาวน์โหลด",
-                        "uri": file_url.strip()
-                    }
-                }]
-            }
-        })
-
-    # ── Bubble 3: รูปสลิปเดิม ──
     if send_slip and slip_url.strip():
-        bubbles.append({
-            "type": "bubble",
-            "size": "kilo",
-            "header": {
-                "type": "box",
-                "layout": "vertical",
-                "backgroundColor": "#1a1a1a",
-                "paddingAll": "14px",
-                "contents": [{
-                    "type": "text",
-                    "text": "🧾 สลิปที่คุณส่งมาค่ะ",
-                    "color": "#f26522",
-                    "weight": "bold",
-                    "size": "sm"
-                }]
-            },
-            "hero": {
-                "type": "image",
-                "url": slip_url.strip(),
-                "size": "full",
-                "aspectRatio": "3:4",
-                "aspectMode": "cover"
-            },
-            "body": {
-                "type": "box",
-                "layout": "vertical",
-                "paddingAll": "12px",
-                "contents": [{
-                    "type": "text",
-                    "text": "รูปสลิปที่คุณส่งมาค่ะ",
-                    "size": "xs",
-                    "color": "#888888",
-                    "wrap": True
-                }]
-            }
-        })
+        bubbles.append(_bubble_slip(slip_url.strip()))
 
     if not bubbles:
-        return {"status": "error", "detail": "ไม่มีเนื้อหาที่จะส่งค่ะ"}
+        return {"status": "error", "detail": "ไม่มีเนื้อหาที่จะส่ง"}
 
-    flex_content = bubbles[0] if len(bubbles) == 1 else {
-        "type": "carousel",
-        "contents": bubbles
-    }
-    alt = "ข้อความจากทีม K-Digi Support"
-
-    payload = {
-        "to": user_id,
-        "messages": [{
-            "type": "flex",
-            "altText": alt,
-            "contents": flex_content
-        }]
-    }
     res = _req.post(
         "https://api.line.me/v2/bot/message/push",
-        headers={
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        },
-        json=payload,
-        timeout=10
+        headers={"Authorization": f"Bearer {access_token}",
+                 "Content-Type": "application/json"},
+        json={"to": user_id, "messages": [{
+            "type": "flex",
+            "altText": "ข้อความจากทีม K-Digi Support",
+            "contents": _flex_content(bubbles),
+        }]},
+        timeout=10,
     )
-    return {"status": "ok"} if res.status_code == 200 else {"status": "error", "detail": res.text}
+    return {"status": "ok"} if res.status_code == 200 else {
+        "status": "error", "detail": res.text
+    }
 
-#=======================================================================================
-    #========================================== Summary line_service.py =========================================
-    
-    #reply_message()
-    #→ ส่งข้อความธรรมดา (Error / Welcome)
 
-    #reply_invoice()
-    #→ ส่ง Flex Message (ใบเสร็จ)
-    #- 1 ใบ → Bubble
-    #- หลายใบ → Carousel
+def _header(text: str) -> dict:
+    return {
+        "type": "box", "layout": "vertical",
+        "backgroundColor": "#1a1a1a", "paddingAll": "14px",
+        "contents": [{"type": "text", "text": text,
+                      "color": "#f26522", "weight": "bold", "size": "sm"}],
+    }
 
-    #reply_info_and_invoice()
-    #→ ส่งทั้งข้อความ + Flex พร้อมกัน
-        
-    #============================================================================================================
+
+def _bubble_message(text: str) -> dict:
+    return {
+        "type": "bubble", "size": "kilo",
+        "header": _header("📩 ข้อความจากทีม K-Digi"),
+        "body": {
+            "type": "box", "layout": "vertical", "paddingAll": "16px",
+            "contents": [{"type": "text", "text": text,
+                          "wrap": True, "size": "sm", "color": "#333333"}],
+        },
+    }
+
+
+def _bubble_file(file_url: str, file_name: str) -> dict:
+    ext = file_url.rsplit(".", 1)[-1].lower() if "." in file_url else ""
+    icons = {"pdf": ("📄", "PDF"), "xlsx": ("📊", "Excel"), "xls": ("📊", "Excel"),
+             "docx": ("📝", "Word"), "doc": ("📝", "Word")}
+    image_exts = {"jpg", "jpeg", "png", "gif", "webp"}
+    if ext in image_exts:
+        icon, type_label = "🖼", "รูปภาพ"
+    else:
+        icon, type_label = icons.get(ext, ("📎", "ไฟล์"))
+
+    display_name = file_name or "ไฟล์จากทีม Support"
+    return {
+        "type": "bubble", "size": "kilo",
+        "header": _header(f"{icon} ไฟล์แนบจากทีม K-Digi"),
+        "body": {
+            "type": "box", "layout": "vertical",
+            "paddingAll": "16px", "spacing": "sm",
+            "contents": [
+                {"type": "text", "text": display_name,
+                 "wrap": True, "weight": "bold", "size": "sm", "color": "#222222"},
+                {"type": "text", "text": f"ประเภท: {type_label}",
+                 "size": "xs", "color": "#888888"},
+            ],
+        },
+        "footer": {
+            "type": "box", "layout": "vertical", "paddingAll": "12px",
+            "contents": [{"type": "button", "style": "primary", "color": "#00B900",
+                          "height": "sm",
+                          "action": {"type": "uri", "label": "คลิกเพื่อดาวน์โหลด",
+                                     "uri": file_url}}],
+        },
+    }
+
+
+def _bubble_slip(slip_url: str) -> dict:
+    return {
+        "type": "bubble", "size": "kilo",
+        "header": _header("🧾 สลิปที่คุณส่งมาค่ะ"),
+        "hero": {
+            "type": "image", "url": slip_url,
+            "size": "full", "aspectRatio": "3:4", "aspectMode": "cover",
+        },
+        "body": {
+            "type": "box", "layout": "vertical", "paddingAll": "12px",
+            "contents": [{"type": "text", "text": "รูปสลิปที่คุณส่งมาค่ะ",
+                          "size": "xs", "color": "#888888", "wrap": True}],
+        },
+    }

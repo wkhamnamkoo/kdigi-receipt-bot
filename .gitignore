@@ -1,4 +1,5 @@
-.env
-venv/
-__pycache__/
-*.pyc
+.env              ← API Keys
+kdigi_logs.db     ← ข้อมูลลูกค้า
+uploads/          ← รูปสลิปลูกค้า
+venv/             ← Virtual environment
+__pycache__/      ← Python cache
