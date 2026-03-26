@@ -1453,21 +1453,35 @@ def add_dashboard_route(app: FastAPI):
         logs  = get_logs()
         today = datetime.now().strftime("%Y-%m-%d")
         output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(["ID","Timestamp","User ID","Slip Type",
-                         "Reference No.","Amount (THB)","Status",
-                         "Invoice No.","OCR Text"])
+        writer = csv.writer(output, quoting=csv.QUOTE_ALL)
+        writer.writerow([
+            "ID", "วันที่/เวลา", "LINE User ID", "ประเภทสลิป",
+            "เลขอ้างอิง", "จำนวนเงิน (บาท)", "สถานะ", "เลขใบเสร็จ",
+            "ข้อความ OCR", "หมายเหตุ", "ผู้รับเคส", "ผู้แก้ไขเคส", "โน้ตการแก้ไข"
+        ])
         for r in logs:
             r = dict(r)
+            # ทำความสะอาด OCR Text — ลบ newline และ markdown ออก
+            ocr = (r.get("ocr_text", "") or "")
+            ocr = ocr.replace("\n", " ").replace("\r", " ").replace("**", "").strip()
             writer.writerow([
-                r.get("id"), r.get("timestamp",""), r.get("user_id",""),
-                r.get("slip_type",""), r.get("ref_no",""), r.get("amount",""),
+                r.get("id",""),
+                r.get("timestamp",""),
+                r.get("user_id",""),
+                r.get("slip_type",""),
+                r.get("ref_no",""),
+                r.get("amount",""),
                 r.get("status",""),
-                r.get("invoice_no",""), (r.get("ocr_text","") or "")[:200]
+                r.get("invoice_no",""),
+                ocr,
+                r.get("remark",""),
+                r.get("claimed_by",""),
+                r.get("resolved_by",""),
+                r.get("resolution_note",""),
             ])
         output.seek(0)
         return StreamingResponse(
-            iter([output.getvalue()]),
+            iter(["\ufeff" + output.getvalue()]),
             media_type="text/csv; charset=utf-8-sig",
             headers={"Content-Disposition": f"attachment; filename=kdigi_logs_{today}.csv"}
         )
