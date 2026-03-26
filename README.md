@@ -1,224 +1,205 @@
-# 🧾 K-Digi Receipt Bot
+# K-Digi Receipt Bot
+### Automated Slip Verification and Receipt Delivery System Using LINE Messaging API
 
-> **LINE Chatbot** สำหรับระบบ K-Digi ของ **KLN Seaport Limited**  
-> ช่วยลูกค้าค้นหาและรับใบเสร็จรับเงินอัตโนมัติผ่าน LINE ค่ะ
-
----
-
-## 📌 ที่มาของโปรเจค
-
-เมื่อลูกค้าชำระเงินค่ายกหรือค่าภาระ (E-Payment / K-Pass) แล้ว **ระบบแจ้งเตือนล้มเหลว** ทำให้ไม่สามารถดาวน์โหลดใบเสร็จจาก K-Digi App ได้ค่ะ ลูกค้าจึงต้องติดต่อทีม Support ทาง LINE ด้วยตนเองทุกครั้งค่ะ
-
-**K-Digi Receipt Bot** แก้ปัญหานี้โดยให้ลูกค้า **ส่งรูปสลิปการโอนเงินมาทาง LINE** แล้วระบบจะค้นหาและส่งลิงก์ใบเสร็จให้อัตโนมัติภายใน 10 วินาทีค่ะ
+> โครงงานสหกิจศึกษา / ผลงานระหว่างการฝึกงาน  
+> บริษัท KLN Seaport Ltd. | ปีการศึกษา 2567
 
 ---
 
-## ✨ ฟีเจอร์หลักค่ะ
+## ข้อมูลผู้จัดทำ
 
-### 🤖 ระบบ Bot (ฝั่ง User)
-
-| ฟีเจอร์ | รายละเอียด |
+| รายการ | รายละเอียด |
 |---|---|
-| 📄 **OCR สลิปอัตโนมัติ** | ใช้ Typhoon OCR อ่านข้อมูลจากรูปสลิปทุกธนาคาร |
-| 🔍 **ค้นหาใบเสร็จ** | เรียก KLN API ด้วย Reference No. + ยอดเงิน |
-| 💬 **Flex Message** | ส่งใบเสร็จกลับเป็น Bubble / Carousel พร้อมปุ่มดาวน์โหลด |
-| 🖼️ **เก็บรูปสลิป** | บันทึกรูปสลิปเป็น Base64 ลง SQLite เป็นหลักฐาน |
-| 🛡️ **Rate Limiting** | ป้องกันส่งสลิปถี่เกินไป (สูงสุด 5 ครั้ง/นาที) |
-| 📱 **Rich Menu** | เมนูถาวรใน LINE พร้อม 3 ปุ่ม (ขอใบเสร็จ / วิธีใช้ / ติดต่อ Admin) |
-| 💬 **Text / Flex แยกกัน** | ข้อความล้วน → Text Message ธรรมดา, มีไฟล์/สลิป → Flex Message |
+| ชื่อ-นามสกุล | นางสาววิลาสินี ขำน้ำคู้ |
+| รหัสนิสิต | 6530202463 |
+| สาขาวิชา | เทคโนโลยีสารสนเทศ |
+| คณะ | วิทยาศาสตร์ ศรีราชา |
+| มหาวิทยาลัย | มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตศรีราชา |
+| สถานประกอบการ | บริษัท KLN Seaport Ltd. |
+| GitHub | [@wkhamnamkoo](https://github.com/wkhamnamkoo) |
 
-### 📊 Admin Dashboard (ฝั่งทีม Support)
+---
 
-| ฟีเจอร์ | รายละเอียด |
+## ความเป็นมาและความสำคัญของปัญหา
+
+บริษัท KLN Seaport Ltd. มีแอปพลิเคชันภายในองค์กรชื่อว่า **K-Digi** ซึ่งให้บริการลูกค้าในด้านการชำระเงิน การตรวจสอบสถานะสินค้า และบริการต่างๆ ที่เกี่ยวข้อง
+
+อย่างไรก็ตาม พบว่าภายหลังการชำระเงินสำเร็จ ลูกค้าบางส่วนไม่สามารถดาวน์โหลดเอกสารใบเสร็จรับเงินได้โดยตรงจากแอปพลิเคชัน เนื่องจากข้อขัดข้องของระบบหรือข้อจำกัดในบางกรณี ส่งผลให้ลูกค้าต้องติดต่อทีมงานผ่านช่องทาง **LINE Official Account** เพื่อขอรับใบเสร็จย้อนหลังเป็นรายกรณี ซึ่งก่อให้เกิดภาระงานแก่ทีม Support เป็นอย่างมาก
+
+โครงงานนี้จึงได้พัฒนา **K-Digi Receipt Bot** ขึ้น เพื่อเป็นระบบเสริมที่เชื่อมต่อกับระบบภายในของบริษัทโดยตรง โดยลูกค้าเพียงส่งสลิปการโอนเงินผ่าน LINE แล้วจะได้รับไฟล์ใบเสร็จรับเงินกลับมาโดยอัตโนมัติ พร้อมกันนี้ยังได้พัฒนา Admin Dashboard สำหรับทีม Support ในการบริหารจัดการเคสที่ระบบอัตโนมัติยังไม่สามารถดำเนินการได้
+
+---
+
+## วัตถุประสงค์
+
+1. เพื่อลดภาระงานของทีม Support ในการออกใบเสร็จรับเงินด้วยตนเอง
+2. เพื่อให้ลูกค้าได้รับใบเสร็จรับเงินได้อย่างรวดเร็วและสะดวกผ่านช่องทาง LINE
+3. เพื่อพัฒนาระบบติดตามและจัดการเคสสำหรับทีม Support ขององค์กร
+
+---
+
+## คุณสมบัติของระบบ
+
+### ส่วนที่ 1 — LINE Bot (ระบบอัตโนมัติ)
+- รับภาพสลิปการโอนเงินจากลูกค้าผ่าน LINE
+- ประมวลผลและอ่านข้อมูลสลิปด้วย **Typhoon OCR API** (เลขอ้างอิง, จำนวนเงิน)
+- ค้นหาและส่งไฟล์ใบเสร็จรับเงินจากระบบ KLN กลับหาลูกค้าในรูปแบบ Flex Message
+- แจ้งเตือนทีม Support ผ่าน LINE Group อัตโนมัติเมื่อระบบไม่สามารถดำเนินการได้
+
+### ส่วนที่ 2 — Admin Dashboard (เครื่องมือสำหรับทีม Support)
+- แสดงรายการ Transaction ทั้งหมดพร้อมระบบกรองข้อมูลและค้นหา
+- ระบบรับเคส (Case Claiming) พร้อมกลไกป้องกันการรับเคสซ้ำ
+- ระบบข้อความสำเร็จรูป (Quick Reply) ที่ทีมงานใช้ร่วมกันผ่านฐานข้อมูลกลาง
+- ส่งข้อความหรือไฟล์ตอบกลับลูกค้าผ่าน LINE ได้จาก Dashboard โดยตรง
+- ออก รายงาน CSV รองรับภาษาไทยใน Microsoft Excel
+- ระบบเข้าสู่ระบบพร้อมการกำหนดสิทธิ์ (Role: admin / support) และ Session 8 ชั่วโมง
+
+### ส่วนที่ 3 — การแจ้งเตือน
+- แจ้ง LINE Group ทีม Support เมื่อมีเคสใหม่เข้ามา มีผู้รับเคส และดำเนินการแก้ไขสำเร็จ
+
+---
+
+## เทคโนโลยีที่ใช้
+
+| ส่วนประกอบ | เทคโนโลยี |
 |---|---|
-| 📊 **Transaction Monitor** | ดูรายการทั้งหมดพร้อม KPI Cards (Total / Success / Error / Rate) |
-| 🔽 **Filter สถานะ** | ทั้งหมด / ✅ สำเร็จ / ⚡ ต้องรีบแก้ไข / ❌ Error ทั่วไป |
-| ⚡ **Urgent Rows** | 3 สถานะพิเศษ highlight สีส้ม + badge กระพริบ |
-| 🎨 **สี Header Popup** | 🟢 เขียว = สำเร็จ, 🔴 แดง = urgent, 🟡 เหลือง = error ทั่วไป |
-| 🔍 **ค้นหา Manual** | Support พิมพ์ Ref No. + Amount ใหม่ → ค้นหาจาก KLN API |
-| 📤 **ส่งใบเสร็จ Manual** | ส่ง Flex Message ถึง User พร้อมอัปเดต DB อัตโนมัติ |
-| ✅ **บันทึกการแก้ไข** | เมื่อส่งสำเร็จ → อัปเดต invoice_no, status, slip_type, ref_no, amount |
-| 📋 **column การแก้ไข** | แสดง ✅ แก้ไขแล้ว / — แยกจาก Status |
-| 🔗 **Deep Link** | ปุ่มใน Flex แจ้งเตือน → `/dashboard?open={id}` → Popup เปิดอัตโนมัติ |
-| 📣 **แจ้งกลุ่ม Support** | เมื่อแก้เคสสำเร็จ → ส่ง Flex สีเขียวแจ้งกลุ่มทันที |
-| ⬇️ **Export CSV** | ส่งออกข้อมูลทั้งหมด |
-| 🔄 **Auto Refresh** | refresh อัตโนมัติทุก 30 วินาที |
-| 🎨 **KLN Brand** | Design match กับระบบ KLN (สีส้ม `#F26522` + header ดำ) |
+| Backend | Python 3.12 + FastAPI |
+| LINE Bot | LINE Bot SDK v3 (LINE Messaging API) |
+| OCR | Typhoon OCR API |
+| ฐานข้อมูล | SQLite |
+| Frontend Dashboard | HTML / CSS / JavaScript |
+| Development Tunnel | ngrok |
+| เครื่องมือช่วยพัฒนา | AI-Assisted Development |
 
 ---
 
-## 🛠️ Tech Stack
+## แผนผังการทำงานของระบบ
 
-```
-Backend    : Python 3.12 + FastAPI
-AI / OCR   : Typhoon OCR (typhoon-ocr) by SCB 10X
-LINE API   : line-bot-sdk-python v3
-Database   : SQLite
-Dashboard  : FastAPI + Vanilla HTML/CSS/JS (KLN Brand)
-Font       : Sarabun (Google Fonts)
-Tunnel     : ngrok (Development)
-```
+### ภาพรวมระบบทั้งหมด (Data Flow)
+![Data Flow](docs/data_flow.png)
+
+### System Flow — การทำงานของระบบภายใน
+![System Flow](docs/system_flow.png)
+
+### User Flow — มุมมองฝั่งลูกค้า
+![User Flow](docs/user_flow.png)
+
+### Support Flow — มุมมองฝั่งทีม Support
+![Support Flow](docs/support_flow.png)
 
 ---
 
-## 📁 โครงสร้างไฟล์
+## การทดสอบแนวคิดด้วย n8n (Prototype)
+
+ก่อนพัฒนาระบบด้วย Python ได้ทดสอบแนวคิดและการไหลของข้อมูลผ่าน **n8n** (No-code / Low-code Automation Platform) เพื่อตรวจสอบความเป็นไปได้ของระบบและทำความเข้าใจ Flow การทำงานทั้งหมดก่อนนำมา implement จริง
+
+![n8n Prototype](docs/n8n_prototype.png)
+
+### Node ที่ใช้ใน Prototype
+
+| Node | หน้าที่ |
+|---|---|
+| LINE Messaging Trigger | รับ event และภาพสลิปจาก LINE |
+| Typhoon OCR (AI Agent) | ส่งภาพให้ AI อ่าน Ref No. และจำนวนเงิน |
+| Edit Image | ปรับภาพสลิปก่อนส่งเข้า OCR |
+| Code (Format OCR) | จัดรูปแบบผลลัพธ์จาก OCR |
+| HTTP Request | เรียก KLN API เพื่อดึงใบเสร็จ |
+| LINE Messaging | ส่ง Flex Message ใบเสร็จกลับหาลูกค้า |
+| Google Sheets | บันทึก Log ทุก transaction |
+| Switch / IF | ตรวจสอบเงื่อนไขและแยก Flow |
+
+### เหตุผลที่ Migrate มาพัฒนาด้วย Python + FastAPI
+
+| ข้อจำกัดของ n8n | แนวทางแก้ไขด้วย Python |
+|---|---|
+| ไม่มี Admin Dashboard สำหรับทีม Support | พัฒนา Dashboard ด้วย FastAPI + HTML/JS |
+| ไม่รองรับระบบ Login และการกำหนดสิทธิ์ (Role) | พัฒนาระบบ Auth ด้วย SHA-256 + Session |
+| ควบคุม Database และ Business Logic ได้จำกัด | ใช้ SQLite จัดการข้อมูลได้อย่างยืดหยุ่น |
+| Notification แบบ Custom Flex Message ทำได้ยาก | เขียน Flex Message เองได้อย่างอิสระ |
+
+---
+
+## โครงสร้างโปรเจค
 
 ```
 line-receipt-bot/
-│
-├── main.py              # Webhook receiver + Flow controller + API endpoints
-├── ocr_service.py       # Typhoon OCR + Regex parser
-├── invoice_service.py   # KLN API caller
-├── line_service.py      # LINE Flex / Text Message sender
-├── db_service.py        # SQLite helpers (log, update, query)
-├── dashboard.py         # Admin Dashboard (/dashboard) + endpoints
-├── setup_richmenu.py    # Script สร้าง Rich Menu (รันครั้งเดียว)
-│
-├── richmenu.png         # รูปพื้นหลัง Rich Menu
-├── kdigi_logs.db        # SQLite database (auto-created)
-├── uploads/             # ไฟล์ที่ Support อัปโหลด
-│
-├── .env                 # API Keys (ไม่ commit ขึ้น Git!)
-├── .gitignore
-└── requirements.txt
+├── main.py              # Webhook และ API Endpoints หลัก
+├── dashboard.py         # Admin Dashboard (HTML/CSS/JS + FastAPI)
+├── auth.py              # ระบบ Login / Session / Password Hash
+├── db_service.py        # SQLite CRUD Operations
+├── invoice_service.py   # เชื่อมต่อ KLN Internal API
+├── line_service.py      # LINE Message Helpers
+├── ocr_service.py       # Typhoon OCR Integration
+├── setup_richmenu.py    # ตั้งค่า LINE Rich Menu (รันครั้งแรกครั้งเดียว)
+└── test_reply.py        # ทดสอบการส่งข้อความ
 ```
 
 ---
 
-## ⚙️ วิธีติดตั้งค่ะ
+## วิธีติดตั้งและใช้งาน
 
-### 1. Clone Repository
+### ความต้องการของระบบ
+- Python 3.12 ขึ้นไป
+- ngrok (สำหรับสภาพแวดล้อมการพัฒนา)
+- LINE Developer Account และ Messaging API Channel
+
+### ขั้นตอนการติดตั้ง
 
 ```bash
-git clone https://github.com/wkhamnamkoo/Automated-Slip-Verification-and-Receipt-Delivery-System-Using-LINE-Messaging-API.git
+# 1. Clone repository
+git clone https://github.com/wkhamnamkoo/Automated-Slip-Verification-and-Receipt-Delivery-System-Using-LINE-Messaging-API
 cd Automated-Slip-Verification-and-Receipt-Delivery-System-Using-LINE-Messaging-API
-```
 
-### 2. สร้าง Virtual Environment
-
-```bash
+# 2. สร้าง Virtual Environment
 python -m venv venv
 .\venv\Scripts\activate        # Windows
 source venv/bin/activate       # Mac / Linux
-```
 
-### 3. ติดตั้ง Dependencies
-
-```bash
+# 3. ติดตั้ง Dependencies
 pip install -r requirements.txt
 ```
 
-### 4. ตั้งค่า `.env`
+### การตั้งค่า Environment Variables
+
+สร้างไฟล์ `.env` ที่ root directory ของโปรเจค:
 
 ```env
-LINE_CHANNEL_SECRET=your_channel_secret
-LINE_CHANNEL_ACCESS_TOKEN=your_channel_access_token
-TYPHOON_API_KEY=your_typhoon_api_key
-KLN_API_URL=https://uat-api-common.ksp.kln.com/customerSupport/getInvoiceList
-LINE_SUPPORT_GROUP_ID=your_support_group_id
-DASHBOARD_URL=https://xxxx.ngrok-free.app/dashboard
+LINE_CHANNEL_ACCESS_TOKEN=your_token
+LINE_CHANNEL_SECRET=your_secret
+LINE_SUPPORT_GROUP_ID=your_group_id
+DASHBOARD_URL=https://xxxx.ngrok-free.dev/dashboard
+TYPHOON_API_KEY=your_typhoon_key
+KLN_API_URL=your_kln_api_url
 ```
 
----
-
-## 🚀 วิธีรันค่ะ
+### การรันระบบ
 
 ```bash
-# Terminal 1 — Server
+# Terminal 1 — รัน FastAPI Server
 uvicorn main:app --reload
 
-# Terminal 2 — ngrok
+# Terminal 2 — เปิด ngrok Tunnel
 ngrok http 8000
 ```
 
-นำ ngrok URL ไปตั้ง Webhook ใน LINE Developers Console ค่ะ
-```
-https://<ngrok-url>/webhook
-```
-
-เปิด Dashboard ที่ค่ะ
-```
-http://localhost:8000/dashboard
-```
-
-### สร้าง Rich Menu (รันครั้งเดียว)
-
-```bash
-python setup_richmenu.py
-```
+นำ URL ที่ได้จาก ngrok ไปตั้งค่าเป็น Webhook URL ใน LINE Developer Console
 
 ---
 
-## 🔄 System Flow
+## ความรู้และทักษะที่ได้รับ
 
-```
-User ส่งรูปสลิป → LINE Webhook → main.py
-  ↓ เช็ค Rate Limit (5/min)
-  ↓ ocr_service.py → Typhoon OCR → ดึง Ref No. + Amount
-  ↓ invoice_service.py → POST KLN API
-  ↓ [สำเร็จ] line_service.py → Flex Message → User
-  ↓ [Error]  notify_support() → Flex แจ้งกลุ่ม Support + ปุ่ม ?open=id
-  ↓ db_service.py → บันทึก Log + รูปสลิป Base64
+โครงงานนี้พัฒนาโดยใช้ **AI เป็นเครื่องมือช่วยในการพัฒนา (AI-Assisted Development)** ภายใต้การวิเคราะห์ความต้องการและการตัดสินใจของผู้จัดทำ ทักษะที่ได้รับจากโครงงานนี้ ได้แก่
 
-Support คลิกปุ่มใน LINE
-  ↓ /dashboard?open={log_id} → Popup เปิดอัตโนมัติ
-  ↓ พิมพ์ Ref No. ที่ถูก → ค้นหา → ส่งใบเสร็จ
-  ↓ อัปเดต DB (invoice_no, status=✅ สำเร็จ (Support))
-  ↓ /notify-resolved → Flex สีเขียวแจ้งกลุ่ม Support
-```
+- ความเข้าใจในการทำงานของ **REST API** และ **Webhook** ในระบบจริง
+- การวิเคราะห์และแก้ไขปัญหา **System Integration** ระหว่าง LINE API กับระบบภายในองค์กร
+- การออกแบบ **Database Schema** และการจัดการฐานข้อมูล SQLite
+- การใช้งาน **Git / GitHub** เพื่อ Version Control ในโปรเจคจริง
+- การรวบรวมและวิเคราะห์ **User Requirement** จากทีม Support เพื่อแปลงเป็น Feature ของระบบ
+- การ Debug และ Troubleshoot ปัญหาในสภาพแวดล้อมการใช้งานจริง
 
 ---
 
-## 🗄️ Database Schema
+## หมายเหตุ
 
-| Column | Type | รายละเอียด |
-|---|---|---|
-| `id` | INTEGER | Primary Key |
-| `timestamp` | TEXT | วันเวลาที่รับสลิป |
-| `user_id` | TEXT | LINE User ID |
-| `slip_type` | TEXT | E-Payment / K-Pass |
-| `ref_no` | TEXT | Reference No. 12 หลัก |
-| `amount` | REAL | ยอดเงิน (บาท) |
-| `status` | TEXT | ✅ สำเร็จ / ❌ Error / ✅ สำเร็จ (Support) |
-| `invoice_no` | TEXT | Invoice File Name |
-| `ocr_text` | TEXT | ข้อความ OCR เต็ม |
-| `slip_image_b64` | TEXT | รูปสลิป Base64 |
-| `resolve_status` | TEXT | สถานะการแก้ไขของทีม Support |
-
----
-
-## 🔌 API Endpoints
-
-| Method | Path | รายละเอียด |
-|---|---|---|
-| POST | `/webhook` | รับ Event จาก LINE |
-| GET | `/dashboard` | หน้า Admin Dashboard |
-| GET | `/dashboard/error-count` | จำนวน Error (สำหรับ auto-refresh) |
-| GET | `/dashboard/export` | Export CSV |
-| GET | `/slip-image/{id}` | ดึงรูปสลิป Base64 |
-| POST | `/reply-user` | Support ตอบกลับ User |
-| POST | `/upload-file` | Support อัปโหลดไฟล์แนบ |
-| POST | `/update-resolve` | อัปเดตสถานะการแก้ไข |
-| POST | `/manual-search` | ค้นหาใบเสร็จจาก Ref No. + Amount |
-| POST | `/manual-send-invoice` | ส่งใบเสร็จ manual + อัปเดต DB |
-| POST | `/notify-resolved` | แจ้งกลุ่ม Support ว่าเคสแก้แล้ว |
-
----
-
-## 👩‍💻 Developer
-
-| | |
-|---|---|
-| **ชื่อ** | นางสาววิลาสินี ขำน้ำคู้ |
-| **รหัสนักศึกษา** | 6530202463 |
-| **สาขา** | เทคโนโลยีสารสนเทศ คณะวิทยาศาสตร์ |
-| **มหาวิทยาลัย** | มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตศรีราชา |
-| **สถานที่ฝึกงาน** | KLN Seaport Limited |
-| **ตำแหน่ง** | Application Support Intern |
-
----
-
-## 📄 License
-
-โปรเจคนี้พัฒนาขึ้นเพื่อการฝึกงานที่ KLN Seaport Limited ค่ะ  
-ห้ามนำไปใช้งานเชิงพาณิชย์โดยไม่ได้รับอนุญาตค่ะ
+โครงงานนี้พัฒนาขึ้นเพื่อการใช้งานภายใน บริษัท KLN Seaport Ltd. เท่านั้น  
+ข้อมูล API Keys, Credentials และข้อมูลส่วนบุคคลของลูกค้าไม่ได้รวมอยู่ใน Repository นี้
